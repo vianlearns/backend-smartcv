@@ -7,42 +7,45 @@ import (
 )
 
 type Config struct {
-	Port            string
-	AppEnv          string
-	DBHost          string
-	DBPort          string
-	DBUser          string
-	DBPassword      string
-	DBName          string
-	AIBaseURL       string
-	AIModel         string
-	MidtransServerKey string
-	MidtransClientKey string
-	JWTSecret       string
+	Port               string
+	AppEnv             string
+	DBHost             string
+	DBPort             string
+	DBUser             string
+	DBPassword         string
+	DBName             string
+	AIBaseURL          string
+	AIModel            string
+	AIAPIKey           string
+	MidtransServerKey  string
+	MidtransClientKey  string
+	MidtransProduction bool
+	CORSAllowedOrigins string
+	JWTSecret          string
 }
 
 func Load() *Config {
 	godotenv.Load()
 
 	return &Config{
-		Port:              getEnv("PORT", "8080"),
-		AppEnv:            getEnv("APP_ENV", "development"),
-		DBHost:            getEnv("DB_HOST", "localhost"),
-		DBPort:            getEnv("DB_PORT", "5432"),
-		DBUser:            getEnv("DB_USER", "vivian"),
-		DBPassword:        getEnv("DB_PASSWORD", "admin"),
-		DBName:            getEnv("DB_NAME", "smartcv"),
-		AIBaseURL:         getEnv("AI_BASE_URL", "http://localhost:20128/v1"),
-		AIModel:           getEnv("AI_MODEL", "GLM"),
-		MidtransServerKey: getEnv("MIDTRANS_SERVER_KEY", ""),
-		MidtransClientKey: getEnv("MIDTRANS_CLIENT_KEY", ""),
-		JWTSecret:         getEnv("JWT_SECRET", "smartcv-secret-key"),
+		Port:               getEnv("PORT"),
+		AppEnv:             getEnv("APP_ENV"),
+		DBHost:             getEnv("DB_HOST"),
+		DBPort:             getEnv("DB_PORT"),
+		DBUser:             getEnv("DB_USER"),
+		DBPassword:         getEnv("DB_PASSWORD"),
+		DBName:             getEnv("DB_NAME"),
+		AIBaseURL:          getEnv("AI_BASE_URL"),
+		AIModel:            getEnv("AI_MODEL"),
+		AIAPIKey:           getEnv("AI_API_KEY"),
+		MidtransServerKey:  getEnv("MIDTRANS_SERVER_KEY"),
+		MidtransClientKey:  getEnv("MIDTRANS_CLIENT_KEY"),
+		MidtransProduction: getEnv("MIDTRANS_IS_PRODUCTION") == "true",
+		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS"),
+		JWTSecret:          getEnv("JWT_SECRET"),
 	}
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
+func getEnv(key string) string {
+	return os.Getenv(key)
 }

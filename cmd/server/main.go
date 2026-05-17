@@ -17,7 +17,7 @@ func main() {
 	database.InitDB(cfg)
 
 	// Initialize AI service
-	aiService := services.NewAIService(cfg.AIBaseURL, cfg.AIModel)
+	aiService := services.NewAIService(cfg.AIBaseURL, cfg.AIModel, cfg.AIAPIKey)
 	handlers.InitAI(aiService)
 
 	// Setup router
