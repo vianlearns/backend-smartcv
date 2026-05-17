@@ -38,10 +38,10 @@ func UploadCV(c *gin.Context) {
 		return
 	}
 
-	// Use AI to extract CV data
-	extractedData, err := aiService.ExtractCVData(string(content))
+	// Parse file and extract CV data using AI
+	extractedData, err := aiService.ParseAndExtract(content, header.Filename)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CV"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CV: " + err.Error()})
 		return
 	}
 
@@ -174,8 +174,10 @@ func GenerateCV(c *gin.Context) {
 func GetCVs(c *gin.Context) {
 	userID := getUserID(c)
 
-	query := `SELECT id, user_id, job_application_id, title, content, ats_score, version, created_at, updated_at 
-	          FROM generated_cvs WHERE user_id = $1 ORDER BY created_at DESC`
+	query := `SELECT c.id, c.user_id, c.job_application_id, j.job_title, c.title, c.content, c.ats_score, c.version, c.created_at, c.updated_at 
+	          FROM generated_cvs c 
+			  LEFT JOIN job_applications j ON c.job_application_id = j.id
+			  WHERE c.user_id = $1 ORDER BY c.created_at DESC`
 
 	rows, err := database.DB.Query(query, userID)
 	if err != nil {
@@ -187,7 +189,12 @@ func GetCVs(c *gin.Context) {
 	var cvs []models.GeneratedCV
 	for rows.Next() {
 		var cv models.GeneratedCV
-		err := rows.Scan(&cv.ID, &cv.UserID, &cv.JobApplicationID, &cv.Title, &cv.Content, &cv.ATSScore, &cv.Version, &cv.CreatedAt, &cv.UpdatedAt)
+		// Use sql.NullString for job_title since it's from a LEFT JOIN
+		var jobTitle sql.NullString
+		err := rows.Scan(&cv.ID, &cv.UserID, &cv.JobApplicationID, &jobTitle, &cv.Title, &cv.Content, &cv.ATSScore, &cv.Version, &cv.CreatedAt, &cv.UpdatedAt)
+		if err == nil && jobTitle.Valid {
+			cv.JobTitle = jobTitle.String
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Scan error"})
 			return
@@ -203,12 +210,18 @@ func GetCV(c *gin.Context) {
 	userID := getUserID(c)
 
 	var cv models.GeneratedCV
-	query := `SELECT id, user_id, job_application_id, title, content, ats_score, version, created_at, updated_at 
-	          FROM generated_cvs WHERE id = $1 AND user_id = $2`
+	query := `SELECT c.id, c.user_id, c.job_application_id, j.job_title, c.title, c.content, c.ats_score, c.version, c.created_at, c.updated_at 
+	          FROM generated_cvs c
+			  LEFT JOIN job_applications j ON c.job_application_id = j.id
+			  WHERE c.id = $1 AND c.user_id = $2`
 
+	var jobTitle sql.NullString
 	err := database.DB.QueryRow(query, id, userID).Scan(
-		&cv.ID, &cv.UserID, &cv.JobApplicationID, &cv.Title, &cv.Content, &cv.ATSScore, &cv.Version, &cv.CreatedAt, &cv.UpdatedAt,
+		&cv.ID, &cv.UserID, &cv.JobApplicationID, &jobTitle, &cv.Title, &cv.Content, &cv.ATSScore, &cv.Version, &cv.CreatedAt, &cv.UpdatedAt,
 	)
+	if err == nil && jobTitle.Valid {
+		cv.JobTitle = jobTitle.String
+	}
 
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
@@ -502,19 +515,62 @@ func DownloadCV(c *gin.Context) {
 	userID := getUserID(c)
 
 	var cv models.GeneratedCV
-	err := database.DB.QueryRow("SELECT content FROM generated_cvs WHERE id = $1 AND user_id = $2", cvID, userID).Scan(&cv.Content)
+	var title string
+	err := database.DB.QueryRow("SELECT content, title FROM generated_cvs WHERE id = $1 AND user_id = $2", cvID, userID).Scan(&cv.Content, &title)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
 		return
 	}
 
-	// Generate PDF (simplified - in production use proper PDF library)
-	// For now, return the content for frontend to handle
+	// Parse CV content to PDFContent struct
+	contentBytes, err := json.Marshal(cv.Content)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CV content"})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"content": cv.Content,
-		"format":  "pdf",
-	})
+	var pdfContent services.CVContent
+	if err := json.Unmarshal(contentBytes, &pdfContent); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CV content structure"})
+		return
+	}
+
+	// Generate PDF
+	pdfGenerator := services.NewPDFGenerator()
+	pdfBytes, err := pdfGenerator.Generate(pdfContent)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate PDF"})
+		return
+	}
+
+	// Set response headers for file download
+	filename := fmt.Sprintf("SmartCV_%s.pdf", sanitizeFilename(title))
+	c.Header("Content-Description", "File Transfer")
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Transfer-Encoding", "binary")
+	c.Header("Expires", "0")
+	c.Header("Cache-Control", "must-revalidate")
+	c.Header("Pragma", "public")
+	c.Header("Content-Length", fmt.Sprintf("%d", len(pdfBytes)))
+
+	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+}
+
+// sanitizeFilename removes or replaces characters that are not safe for filenames
+func sanitizeFilename(name string) string {
+	result := ""
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			result += string(r)
+		} else if r == ' ' {
+			result += "_"
+		}
+	}
+	if len(result) > 50 {
+		result = result[:50]
+	}
+	return result
 }
 
 func getUserProfileString(userID int) string {
@@ -536,9 +592,9 @@ func getUserProfileString(userID int) string {
 	experiences := ""
 	for rows.Next() {
 		var company, position, description string
-		var startDate, endDate time.Time
+		var startDate, endDate string
 		rows.Scan(&company, &position, &startDate, &endDate, &description)
-		experiences += fmt.Sprintf("- %s at %s (%s - %s): %s\n", position, company, startDate.Format("2006"), endDate.Format("2006"), description)
+		experiences += fmt.Sprintf("- %s at %s (%s - %s): %s\n", position, company, startDate, endDate, description)
 	}
 
 	// Get skills

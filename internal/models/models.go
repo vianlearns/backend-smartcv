@@ -33,8 +33,8 @@ type Experience struct {
 	Company      string    `json:"company"`
 	Position     string    `json:"position"`
 	Location     string    `json:"location"`
-	StartDate    time.Time `json:"start_date"`
-	EndDate      *time.Time `json:"end_date"`
+	StartDate    string    `json:"start_date"`
+	EndDate      string    `json:"end_date"`
 	IsCurrent    bool      `json:"is_current"`
 	Description  string    `json:"description"`
 	Achievements []string  `json:"achievements"`
@@ -48,8 +48,8 @@ type Education struct {
 	Degree        string    `json:"degree"`
 	FieldOfStudy  string    `json:"field_of_study"`
 	Location      string    `json:"location"`
-	StartDate     time.Time `json:"start_date"`
-	EndDate       *time.Time `json:"end_date"`
+	StartDate     string    `json:"start_date"`
+	EndDate       string    `json:"end_date"`
 	GPA           float64   `json:"gpa"`
 	Achievements  []string  `json:"achievements"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -65,27 +65,27 @@ type Skill struct {
 }
 
 type Certification struct {
-	ID            int        `json:"id"`
-	UserID        int        `json:"user_id"`
-	Name          string     `json:"name"`
-	Issuer        string     `json:"issuer"`
-	IssueDate     *time.Time `json:"issue_date"`
-	ExpiryDate    *time.Time `json:"expiry_date"`
-	CredentialID  string     `json:"credential_id"`
-	CredentialURL string     `json:"credential_url"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID            int       `json:"id"`
+	UserID        int       `json:"user_id"`
+	Name          string    `json:"name"`
+	Issuer        string    `json:"issuer"`
+	IssueDate     string    `json:"issue_date"`
+	ExpiryDate    string    `json:"expiry_date"`
+	CredentialID  string    `json:"credential_id"`
+	CredentialURL string    `json:"credential_url"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type Project struct {
-	ID            int        `json:"id"`
-	UserID        int        `json:"user_id"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description"`
-	Technologies  []string   `json:"technologies"`
-	URL           string     `json:"url"`
-	StartDate     *time.Time `json:"start_date"`
-	EndDate       *time.Time `json:"end_date"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID           int       `json:"id"`
+	UserID       int       `json:"user_id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	Technologies []string  `json:"technologies"`
+	URL          string    `json:"url"`
+	StartDate    string    `json:"start_date"`
+	EndDate      string    `json:"end_date"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type JobApplication struct {
@@ -105,6 +105,7 @@ type GeneratedCV struct {
 	ID               int            `json:"id"`
 	UserID           int            `json:"user_id"`
 	JobApplicationID int            `json:"job_application_id"`
+	JobTitle         string         `json:"job_title"`
 	Title            string         `json:"title"`
 	Content          map[string]any `json:"content"`
 	ATSScore         int            `json:"ats_score"`

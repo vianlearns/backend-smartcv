@@ -5,6 +5,8 @@ import (
 	"smartcv-backend/internal/handlers"
 	"smartcv-backend/internal/middleware"
 
+	"strings"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -13,8 +15,13 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	router := gin.Default()
 
 	// CORS middleware
+	allowedOrigins := strings.Split(cfg.CORSAllowedOrigins, ",")
+	for i := range allowedOrigins {
+		allowedOrigins[i] = strings.TrimSpace(allowedOrigins[i])
+	}
+
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://127.0.0.1:3000"},
+		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},

@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"smartcv-backend/internal/database"
 	"smartcv-backend/internal/middleware"
 	"smartcv-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 )
 
 func GetUser(c *gin.Context) {
@@ -140,16 +140,14 @@ func GetExperiences(c *gin.Context) {
 	var experiences []models.Experience
 	for rows.Next() {
 		var exp models.Experience
-		var achievements []byte
 		err := rows.Scan(
 			&exp.ID, &exp.UserID, &exp.Company, &exp.Position, &exp.Location,
-			&exp.StartDate, &exp.EndDate, &exp.IsCurrent, &exp.Description, &achievements, &exp.CreatedAt,
+			&exp.StartDate, &exp.EndDate, &exp.IsCurrent, &exp.Description, pq.Array(&exp.Achievements), &exp.CreatedAt,
 		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Scan error"})
 			return
 		}
-		json.Unmarshal(achievements, &exp.Achievements)
 		experiences = append(experiences, exp)
 	}
 
@@ -168,13 +166,14 @@ func CreateExperience(c *gin.Context) {
 	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 
 	err := database.DB.QueryRow(query, userID, exp.Company, exp.Position, exp.Location,
-		exp.StartDate, exp.EndDate, exp.IsCurrent, exp.Description, exp.Achievements).Scan(&exp.ID)
+		exp.StartDate, exp.EndDate, exp.IsCurrent, exp.Description, pq.Array(exp.Achievements)).Scan(&exp.ID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create experience"})
 		return
 	}
 
+	exp.UserID = userID
 	c.JSON(http.StatusCreated, exp)
 }
 
@@ -191,7 +190,7 @@ func UpdateExperience(c *gin.Context) {
 	          WHERE id = $9 AND user_id = $10`
 
 	_, err := database.DB.Exec(query, exp.Company, exp.Position, exp.Location,
-		exp.StartDate, exp.EndDate, exp.IsCurrent, exp.Description, exp.Achievements, id, userID)
+		exp.StartDate, exp.EndDate, exp.IsCurrent, exp.Description, pq.Array(exp.Achievements), id, userID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update experience"})
@@ -230,16 +229,14 @@ func GetEducations(c *gin.Context) {
 	var educations []models.Education
 	for rows.Next() {
 		var edu models.Education
-		var achievements []byte
 		err := rows.Scan(
 			&edu.ID, &edu.UserID, &edu.Institution, &edu.Degree, &edu.FieldOfStudy, &edu.Location,
-			&edu.StartDate, &edu.EndDate, &edu.GPA, &achievements, &edu.CreatedAt,
+			&edu.StartDate, &edu.EndDate, &edu.GPA, pq.Array(&edu.Achievements), &edu.CreatedAt,
 		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Scan error"})
 			return
 		}
-		json.Unmarshal(achievements, &edu.Achievements)
 		educations = append(educations, edu)
 	}
 
@@ -258,13 +255,14 @@ func CreateEducation(c *gin.Context) {
 	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 
 	err := database.DB.QueryRow(query, userID, edu.Institution, edu.Degree, edu.FieldOfStudy,
-		edu.Location, edu.StartDate, edu.EndDate, edu.GPA, edu.Achievements).Scan(&edu.ID)
+		edu.Location, edu.StartDate, edu.EndDate, edu.GPA, pq.Array(edu.Achievements)).Scan(&edu.ID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create education"})
 		return
 	}
 
+	edu.UserID = userID
 	c.JSON(http.StatusCreated, edu)
 }
 
@@ -281,7 +279,7 @@ func UpdateEducation(c *gin.Context) {
 	          WHERE id = $9 AND user_id = $10`
 
 	_, err := database.DB.Exec(query, edu.Institution, edu.Degree, edu.FieldOfStudy,
-		edu.Location, edu.StartDate, edu.EndDate, edu.GPA, edu.Achievements, id, userID)
+		edu.Location, edu.StartDate, edu.EndDate, edu.GPA, pq.Array(edu.Achievements), id, userID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update education"})
@@ -346,6 +344,7 @@ func CreateSkill(c *gin.Context) {
 		return
 	}
 
+	s.UserID = userID
 	c.JSON(http.StatusCreated, s)
 }
 
@@ -429,6 +428,7 @@ func CreateCertification(c *gin.Context) {
 		return
 	}
 
+	cert.UserID = userID
 	c.JSON(http.StatusCreated, cert)
 }
 
@@ -461,14 +461,12 @@ func GetProjects(c *gin.Context) {
 	var projects []models.Project
 	for rows.Next() {
 		var p models.Project
-		var technologies []byte
-		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &technologies,
+		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, pq.Array(&p.Technologies),
 			&p.URL, &p.StartDate, &p.EndDate, &p.CreatedAt)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Scan error"})
 			return
 		}
-		json.Unmarshal(technologies, &p.Technologies)
 		projects = append(projects, p)
 	}
 
@@ -486,7 +484,7 @@ func CreateProject(c *gin.Context) {
 	query := `INSERT INTO projects (user_id, name, description, technologies, url, start_date, end_date)
 	          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
 
-	err := database.DB.QueryRow(query, userID, p.Name, p.Description, p.Technologies,
+	err := database.DB.QueryRow(query, userID, p.Name, p.Description, pq.Array(p.Technologies),
 		p.URL, p.StartDate, p.EndDate).Scan(&p.ID)
 
 	if err != nil {
@@ -494,6 +492,7 @@ func CreateProject(c *gin.Context) {
 		return
 	}
 
+	p.UserID = userID
 	c.JSON(http.StatusCreated, p)
 }
 
@@ -509,7 +508,7 @@ func UpdateProject(c *gin.Context) {
 	query := `UPDATE projects SET name = $1, description = $2, technologies = $3, url = $4, start_date = $5, end_date = $6
 	          WHERE id = $7 AND user_id = $8`
 
-	_, err := database.DB.Exec(query, p.Name, p.Description, p.Technologies, p.URL,
+	_, err := database.DB.Exec(query, p.Name, p.Description, pq.Array(p.Technologies), p.URL,
 		p.StartDate, p.EndDate, id, userID)
 
 	if err != nil {

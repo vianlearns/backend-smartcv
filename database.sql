@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- User profiles table
 CREATE TABLE IF NOT EXISTS user_profiles (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     full_name VARCHAR(255),
     email VARCHAR(255),
     phone VARCHAR(50),
@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS experiences (
     company VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
     location VARCHAR(255),
-    start_date DATE,
-    end_date DATE,
+    start_date VARCHAR(50),
+    end_date VARCHAR(50),
     is_current BOOLEAN DEFAULT FALSE,
     description TEXT,
     achievements TEXT[],
@@ -50,8 +50,8 @@ CREATE TABLE IF NOT EXISTS educations (
     degree VARCHAR(255) NOT NULL,
     field_of_study VARCHAR(255),
     location VARCHAR(255),
-    start_date DATE,
-    end_date DATE,
+    start_date VARCHAR(50),
+    end_date VARCHAR(50),
     gpa DECIMAL(3,2),
     achievements TEXT[],
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -73,8 +73,8 @@ CREATE TABLE IF NOT EXISTS certifications (
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     issuer VARCHAR(255),
-    issue_date DATE,
-    expiry_date DATE,
+    issue_date VARCHAR(50),
+    expiry_date VARCHAR(50),
     credential_id VARCHAR(255),
     credential_url VARCHAR(500),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -88,8 +88,8 @@ CREATE TABLE IF NOT EXISTS projects (
     description TEXT,
     technologies TEXT[],
     url VARCHAR(500),
-    start_date DATE,
-    end_date DATE,
+    start_date VARCHAR(50),
+    end_date VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
