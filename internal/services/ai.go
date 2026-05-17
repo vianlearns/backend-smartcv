@@ -6,19 +6,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 type AIService struct {
 	BaseURL string
 	Model   string
+	APIKey  string
 	Client  *http.Client
 }
 
-func NewAIService(baseURL, model string) *AIService {
+func NewAIService(baseURL, model, apiKey string) *AIService {
 	return &AIService{
 		BaseURL: baseURL,
 		Model:   model,
+		APIKey:  apiKey,
 		Client: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -77,6 +80,9 @@ func (s *AIService) Chat(messages []ChatMessage) (string, error) {
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("User-Agent", "HermesAgent/1.0")
+	if s.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+s.APIKey)
+	}
 
 	resp, err := s.Client.Do(httpReq)
 	if err != nil {
@@ -93,6 +99,14 @@ func (s *AIService) Chat(messages []ChatMessage) (string, error) {
 		return "", fmt.Errorf("AI API error: %s - %s", resp.Status, string(respBody))
 	}
 
+	// Handle streaming response from 9Router
+	respText := string(respBody)
+	if respText[:5] == "data:" {
+		// Parse SSE streaming format
+		return parseStreamingResponse(respText)
+	}
+
+	// Non-streaming response
 	var chatResp ChatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
 		return "", fmt.Errorf("failed to parse response: %v", err)
@@ -103,6 +117,33 @@ func (s *AIService) Chat(messages []ChatMessage) (string, error) {
 	}
 
 	return chatResp.Choices[0].Message.Content, nil
+}
+
+func parseStreamingResponse(data string) (string, error) {
+	lines := []string{}
+	for _, line := range bytes.Split([]byte(data), []byte("\n")) {
+		lineStr := string(bytes.TrimSpace(line))
+		if lineStr == "" || lineStr == "data: [DONE]" {
+			continue
+		}
+		if len(lineStr) > 6 && lineStr[:6] == "data: " {
+			jsonPart := lineStr[6:]
+			var chunk struct {
+				Choices []struct {
+					Delta struct {
+						Content string `json:"content"`
+					} `json:"delta"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal([]byte(jsonPart), &chunk); err != nil {
+				continue
+			}
+			if len(chunk.Choices) > 0 {
+				lines = append(lines, chunk.Choices[0].Delta.Content)
+			}
+		}
+	}
+	return strings.Join(lines, ""), nil
 }
 
 func (s *AIService) AnalyzeGap(userProfile, jobDescription string) (string, error) {
@@ -251,6 +292,72 @@ Return ONLY the updated JSON object.`
 	messages := []ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: fmt.Sprintf("CURRENT CV:\n%s\n\nREVISION REQUEST:\n%s", cvContent, comment)},
+	}
+
+	return s.Chat(messages)
+}
+
+func (s *AIService) ExtractCVData(content string) (string, error) {
+	systemPrompt := `You are a CV/Resume parser. Extract all relevant information from the provided text.
+
+Extract the following information and return as JSON:
+{
+  "name": "Full Name",
+  "email": "email@example.com",
+  "phone": "phone number",
+  "address": "city, country",
+  "summary": "professional summary",
+  "experiences": [
+    {
+      "company": "Company Name",
+      "position": "Job Title",
+      "location": "City, Country",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD or null if current",
+      "is_current": true/false,
+      "description": "job description",
+      "achievements": ["achievement 1", "achievement 2"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University Name",
+      "degree": "Degree Type",
+      "field_of_study": "Major/Field",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD",
+      "gpa": 3.5
+    }
+  ],
+  "skills": [
+    {
+      "name": "Skill Name",
+      "category": "Technical/Soft/Language/etc",
+      "proficiency": "Expert/Intermediate/Beginner"
+    }
+  ],
+  "certifications": [
+    {
+      "name": "Certification Name",
+      "issuer": "Issuing Organization",
+      "issue_date": "YYYY-MM-DD",
+      "credential_id": "ID if available"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Project Name",
+      "description": "Brief description",
+      "technologies": ["tech1", "tech2"]
+    }
+  ]
+}
+
+Return ONLY the JSON object. If information is not available, use empty string or empty array.`
+
+	messages := []ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: content},
 	}
 
 	return s.Chat(messages)
