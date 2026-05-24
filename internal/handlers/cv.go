@@ -8,11 +8,38 @@ import (
 	"smartcv-backend/internal/database"
 	"smartcv-backend/internal/models"
 	"smartcv-backend/internal/services"
+	"smartcv-backend/internal/utils"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+func cleanJSON(s string) string {
+	s = strings.TrimSpace(s)
+	
+	// Find the start of the JSON block
+	startIdx := strings.Index(s, "```json")
+	if startIdx != -1 {
+		// Find the end of the JSON block starting from after ```json
+		endIdx := strings.LastIndex(s, "```")
+		if endIdx > startIdx {
+			s = s[startIdx+7 : endIdx]
+		}
+	} else {
+		// Try without "json" specifier
+		startIdx = strings.Index(s, "```")
+		if startIdx != -1 {
+			endIdx := strings.LastIndex(s, "```")
+			if endIdx > startIdx {
+				s = s[startIdx+3 : endIdx]
+			}
+		}
+	}
+	
+	return strings.TrimSpace(s)
+}
 
 var aiService *services.AIService
 
@@ -75,16 +102,32 @@ func UploadCV(c *gin.Context) {
 
 func AnalyzeGap(c *gin.Context) {
 	userID := getUserID(c)
-	var req models.JobInputRequest
+	var req struct {
+		JobApplicationID int `json:"job_application_id" binding:"required"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get job application
+	var job models.JobApplication
+	err := database.DB.QueryRow(`SELECT id, user_id, job_title, company, job_type, job_description, qualifications 
+		FROM job_applications WHERE id = $1 AND user_id = $2`, req.JobApplicationID, userID).Scan(
+		&job.ID, &job.UserID, &job.JobTitle, &job.Company, &job.JobType, &job.JobDescription, &job.Qualifications)
+
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get job application: " + err.Error()})
 		return
 	}
 
 	// Get user profile data
 	userProfile := getUserProfileString(userID)
 	jobDescription := fmt.Sprintf("Title: %s\nCompany: %s\nType: %s\n\nDescription: %s\n\nQualifications: %s",
-		req.JobTitle, req.Company, req.JobType, req.JobDescription, req.Qualifications)
+		job.JobTitle, job.Company, job.JobType, job.JobDescription, job.Qualifications)
 
 	result, err := aiService.AnalyzeGap(userProfile, jobDescription)
 	if err != nil {
@@ -93,7 +136,13 @@ func AnalyzeGap(c *gin.Context) {
 	}
 
 	var response models.GapAnalysisResponse
-	json.Unmarshal([]byte(result), &response)
+	cleanedResult := cleanJSON(result)
+	if err := json.Unmarshal([]byte(cleanedResult), &response); err != nil {
+		// Log the error and the raw result for debugging
+		fmt.Printf("JSON Unmarshal Error in AnalyzeGap: %v\nRaw Result: %s\n", err, result)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse AI response: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, response)
 }
@@ -146,7 +195,12 @@ func GenerateCV(c *gin.Context) {
 	}
 
 	var content map[string]any
-	json.Unmarshal([]byte(cvContent), &content)
+	cleanedCvContent := cleanJSON(cvContent)
+	if err := json.Unmarshal([]byte(cleanedCvContent), &content); err != nil {
+		fmt.Printf("JSON Unmarshal Error in GenerateCV: %v\nRaw Result: %s\n", err, cvContent)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse generated CV: " + err.Error()})
+		return
+	}
 
 	// Save CV
 	var cvID int
@@ -231,7 +285,24 @@ func GetCV(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, cv)
+	// Add free revision window info
+	isFreeRevision := utils.IsWithinFreeRevisionWindow(cv.CreatedAt)
+	revisionDeadline := utils.GetRevisionDeadline(cv.CreatedAt)
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":                 cv.ID,
+		"user_id":            cv.UserID,
+		"job_application_id": cv.JobApplicationID,
+		"job_title":          cv.JobTitle,
+		"title":              cv.Title,
+		"content":            cv.Content,
+		"ats_score":          cv.ATSScore,
+		"version":            cv.Version,
+		"created_at":         cv.CreatedAt,
+		"updated_at":         cv.UpdatedAt,
+		"free_revision":      isFreeRevision,
+		"revision_deadline":  revisionDeadline,
+	})
 }
 
 func UpdateCV(c *gin.Context) {
@@ -312,8 +383,45 @@ func CreateComment(c *gin.Context) {
 	}
 
 	cvIDInt, _ := strconv.Atoi(cvID)
+
+	// Check if CV is within 48-hour free revision window
+	var cvCreatedAt time.Time
+	var cvUserID int
+	err := database.DB.QueryRow("SELECT created_at, user_id FROM generated_cvs WHERE id = $1", cvIDInt).Scan(&cvCreatedAt, &cvUserID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
+		return
+	}
+
+	// Verify ownership
+	if cvUserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Check if outside free revision window (48 hours)
+	isFreeRevision := utils.IsWithinFreeRevisionWindow(cvCreatedAt)
+	
+	// If outside window, check and deduct credits
+	if !isFreeRevision {
+		var credits int
+		err = database.DB.QueryRow("SELECT credits FROM users WHERE id = $1", userID).Scan(&credits)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check credits"})
+			return
+		}
+
+		if credits < 1 {
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error": "Insufficient credits. Free revision period (48h) has expired.",
+				"free_revision_expired": true,
+			})
+			return
+		}
+	}
+
 	var commentID int
-	err := database.DB.QueryRow(`
+	err = database.DB.QueryRow(`
 		INSERT INTO cv_comments (cv_id, user_id, section, content) 
 		VALUES ($1, $2, $3, $4) RETURNING id
 	`, cvIDInt, userID, req.Section, req.Content).Scan(&commentID)
@@ -335,9 +443,18 @@ func CreateComment(c *gin.Context) {
 		database.DB.Exec("UPDATE generated_cvs SET content = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", updatedContent, cvIDInt)
 	}
 
+	// Deduct credit if outside free revision window
+	if !isFreeRevision {
+		database.DB.Exec("UPDATE users SET credits = credits - 1 WHERE id = $1", userID)
+		database.DB.Exec(`INSERT INTO credit_transactions (user_id, amount, type, description) VALUES ($1, -1, 'usage', 'CV Revision (outside 48h window)')`, userID)
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
-		"id":      commentID,
-		"message": "Comment created and revision applied",
+		"id":                   commentID,
+		"message":              "Comment created and revision applied",
+		"free_revision":        isFreeRevision,
+		"credits_deducted":     !isFreeRevision,
+		"revision_deadline":    utils.GetRevisionDeadline(cvCreatedAt),
 	})
 }
 
